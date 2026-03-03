@@ -6,9 +6,7 @@ Notes for Claude Code when working in this repository.
 
 ## Environment
 
-- Python: `/Users/alexhoward/.venv/bin/python`
-- Install packages: `uv pip install <pkg> --python /Users/alexhoward/.venv/bin/python`
-- Run scripts from the repo root: `cd /Users/alexhoward/code/po10_scraper`
+Run all scripts from the repo root. Use whichever Python interpreter has the dependencies installed.
 
 ---
 
@@ -16,18 +14,16 @@ Notes for Claude Code when working in this repository.
 
 ```bash
 # Reprocess using cached athlete HTML (no browser, fast)
-/Users/alexhoward/.venv/bin/python scripts/fetch_club.py \
-  --guids-file data/thames_hare_hounds_guids.json
+python scripts/fetch_club.py --guids-file data/thames_hare_hounds_guids.json
 
 # Full scrape (requires Playwright + network)
-/Users/alexhoward/.venv/bin/python scripts/fetch_club.py \
-  --club "Thames Hare & Hounds"
+python scripts/fetch_club.py --club "Thames Hare & Hounds"
 
 # Rebuild WMA age-grading cache from Howard Grubb's web pages
-/Users/alexhoward/.venv/bin/python scripts/build_age_grade_cache.py
+python scripts/build_age_grade_cache.py
 
 # Spot-check the output
-/Users/alexhoward/.venv/bin/python -c "
+python -c "
 import polars as pl
 df = pl.read_parquet('data/exports/thames_hare_hounds.parquet')
 print(df.schema)
@@ -88,7 +84,7 @@ Key distinction: `"5K"` uses road standard (779 s), `"5000"` uses track standard
 | Cache file | Purpose | Gitignored? |
 |---|---|---|
 | `data/athletes/<guid>.json` | Raw HTML per athlete | Yes (300+ files) |
-| `data/thames_hare_hounds_guids.json` | Athlete GUIDs from last search | No |
+| `data/*_guids.json` | Athlete GUIDs from last search | Yes |
 | `data/age_grade_tables.json` | WMA factor tables | No |
 | `data/exports/*.parquet` / `*.csv` | Output | Yes |
 
