@@ -1,6 +1,10 @@
 # Monthly Results Round-Up
 
-Generate a monthly results round-up HTML email for Thames Hare & Hounds.
+Generate a monthly results round-up HTML email for a Power of 10 club.
+
+**Club:** $ARGUMENTS (default: Thames Hare & Hounds if not specified)
+
+Use the club name exactly as it appears on powerof10.uk. Substitute it into every command below that contains `CLUB_NAME`.
 
 ---
 
@@ -9,7 +13,7 @@ Generate a monthly results round-up HTML email for Thames Hare & Hounds.
 Run a full scrape from scratch (browser search + fresh athlete profiles):
 
 ```bash
-/Users/alexhoward/.venv/bin/python scripts/fetch_club.py --club "Thames Hare & Hounds"
+/Users/alexhoward/.venv/bin/python scripts/fetch_club.py --club "CLUB_NAME"
 ```
 
 This re-searches PO10 for the current club membership and re-fetches all athlete profiles. Wait for it to complete before proceeding.
@@ -21,7 +25,7 @@ This re-searches PO10 for the current club membership and re-fetches all athlete
 Run the summary script for the last 30 days (adjust `--days` or use `--since YYYY-MM-DD` for a different window):
 
 ```bash
-/Users/alexhoward/.venv/bin/python scripts/summarise_recent.py --days 30
+/Users/alexhoward/.venv/bin/python scripts/summarise_recent.py --club "CLUB_NAME" --days 30
 ```
 
 Capture the JSON output. It contains:
@@ -130,5 +134,5 @@ Use **inline CSS only** (required for email client compatibility).
 ## Example subject line
 
 ```
-Thames H&H Results Round-Up — [Month] [Year]
+[Club Name] Results Round-Up — [Month] [Year]
 ```

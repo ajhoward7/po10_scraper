@@ -19,6 +19,11 @@ from playwright.async_api import Page, async_playwright
 _SEARCH_URL = "https://www.powerof10.uk/Home/AthleteSearch"
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
+_STATIC_EXTS = (
+    ".js", ".css", ".png", ".jpg", ".jpeg", ".ico",
+    ".woff", ".woff2", ".ttf", ".svg", ".map", ".gif", ".webp",
+)
+
 
 async def get_club_athlete_guids(club_name: str) -> list[dict]:
     """
@@ -39,6 +44,10 @@ async def get_club_athlete_guids(club_name: str) -> list[dict]:
         browser = await p.chromium.launch(headless=False)
         context = await browser.new_context(viewport={"width": 1280, "height": 800})
         page = await context.new_page()
+
+        # Log JS console messages — useful for diagnosing reCAPTCHA failures
+        page.on("console", lambda msg: _log_console(msg))
+        page.on("pageerror", lambda err: print(f"\n  [js error] {err}"))
 
         # First page
         page_athletes = await _search_page(page, club_name)
@@ -69,17 +78,26 @@ async def get_club_athlete_guids(club_name: str) -> list[dict]:
     return unique
 
 
+def _log_console(msg) -> None:
+    """Print browser console messages that look like errors or warnings."""
+    if msg.type in ("error", "warning"):
+        print(f"\n  [browser {msg.type}] {msg.text}")
+
+
 async def _search_page(page: Page, club_name: str) -> list[dict]:
     """Navigate to the search page, submit the club query, and wait for the AJAX response."""
     collected: list[dict] = []
     response_event = asyncio.Event()
 
-    # Static file extensions to ignore
-    _STATIC_EXTS = (".js", ".css", ".png", ".jpg", ".ico", ".woff", ".woff2", ".ttf", ".svg", ".map")
-
     async def handle_response(response):
-        # Only care about the RunAthleteSearch endpoint
-        if "RunAthleteSearch" not in response.url:
+        url = response.url
+
+        # Skip static assets
+        if any(url.lower().endswith(ext) for ext in _STATIC_EXTS):
+            return
+
+        # Only care about powerof10.uk API responses
+        if "powerof10.uk" not in url:
             return
 
         try:
@@ -87,33 +105,58 @@ async def _search_page(page: Page, club_name: str) -> list[dict]:
         except Exception:
             return
 
+        if not body.strip().startswith(("{", "[")):
+            return  # not JSON
+
+        print(f"\n  [response] {response.status} {url}")
+
         try:
             import json as _json
             data = _json.loads(body)
         except Exception:
-            print(f"\n  [debug] Non-JSON RunAthleteSearch response: {body[:300]!r}")
-            response_event.set()
+            print(f"  [debug] Non-JSON body: {body[:200]!r}")
             return
 
-        status = data.get("status", "")
+        status = data.get("status", "") if isinstance(data, dict) else ""
 
         if status == "RECAPTCHA_REQUIRED":
-            # First probe — JS will call grecaptcha.execute() and retry with a real token
-            print("\n  reCaptcha token requested, waiting for retry...")
-            return
+            print("  reCaptcha token requested — waiting for browser to retry automatically...")
+            return  # JS will call grecaptcha.execute() and retry; don't set event yet
 
         if status == "ERROR_RECAPTCHA":
-            print("\n  [warning] reCaptcha token rejected by server.")
+            print("  [warning] reCaptcha token rejected. You may be rate-limited or flagged as a bot.")
+            print("  Try waiting a few minutes, or use --guids-file with the cached GUIDs.")
             response_event.set()
             return
 
+        if status not in ("", "OK", "ok") and not isinstance(data, list):
+            print(f"  [debug] Unexpected status {status!r}, body: {body[:300]!r}")
+
+        # Try to extract athletes regardless of which endpoint returned the data
+        before = len(collected)
         _extract_athletes(data, collected)
-        response_event.set()
+        if len(collected) > before:
+            print(f"  Extracted {len(collected) - before} athletes from {url}")
+            response_event.set()
+        elif not response_event.is_set() and "Search" in url:
+            # Search endpoint returned something but no athletes — might be empty result
+            print(f"  [debug] Search response had no recognisable athlete records. Body: {body[:400]!r}")
+            response_event.set()
 
     await page.goto(_SEARCH_URL, wait_until="domcontentloaded")
+
+    # Verify the input fields exist before filling
+    club_input = await page.query_selector("#searchClubName")
+    submit_btn = await page.query_selector("#search-submit")
+    if not club_input:
+        print("  [error] Could not find #searchClubName input — page structure may have changed.")
+        return collected
+    if not submit_btn:
+        print("  [error] Could not find #search-submit button — page structure may have changed.")
+        return collected
+
     await page.fill("#searchClubName", club_name)
 
-    # Register listener just before the click
     page.on("response", handle_response)
     await page.click("#search-submit")
 
@@ -122,7 +165,13 @@ async def _search_page(page: Page, club_name: str) -> list[dict]:
     page.remove_listener("response", handle_response)
 
     if not response_event.is_set():
-        print("\n  [warning] Timed out — no API response received after 120s.")
+        print("\n  [timeout] No usable search response received after 120s.")
+        print("  Possible causes:")
+        print("    • Rate-limited or IP blocked by powerof10.uk")
+        print("    • reCAPTCHA challenge not resolved in time")
+        print("    • Search endpoint URL has changed")
+        print("  Tip: if you have a recent data/thames_hare_hounds_guids.json, re-run with:")
+        print("       --guids-file data/thames_hare_hounds_guids.json")
 
     return collected
 
@@ -142,21 +191,26 @@ async def _next_page(page: Page) -> list[dict]:
     response_event = asyncio.Event()
 
     async def handle_response(response):
-        if "RunAthleteSearch" not in response.url:
+        url = response.url
+        if any(url.lower().endswith(ext) for ext in _STATIC_EXTS):
+            return
+        if "powerof10.uk" not in url:
             return
         try:
             body = await response.text()
         except Exception:
             return
-        if body.strip() == "RECAPTCHA_REQUIRED":
+        if not body.strip().startswith(("{", "[")):
             return
         try:
             import json as _json
             data = _json.loads(body)
+            before = len(collected)
             _extract_athletes(data, collected)
+            if len(collected) > before or "Search" in url:
+                response_event.set()
         except Exception:
             pass
-        response_event.set()
 
     page.on("response", handle_response)
     await next_btn.click()
@@ -177,19 +231,6 @@ async def _wait_with_spinner(event: asyncio.Event, timeout: int, label: str) -> 
         sys.stdout.flush()
         frame += 1
         await asyncio.sleep(0.1)
-
-
-def _is_empty_result(data: dict | list) -> bool:
-    """Return True if the response is a valid but empty result set."""
-    if isinstance(data, list):
-        return len(data) == 0
-    if isinstance(data, dict):
-        status = data.get("status", "")
-        if status in ("OK", "ok") and not data.get("results"):
-            return True
-        if "noResults" in data or data.get("count") == 0:
-            return True
-    return False
 
 
 def _extract_athletes(data: dict | list, out: list[dict]) -> None:

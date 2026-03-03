@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Output a structured JSON summary of recent Thames H&H performances.
+Output a structured JSON summary of recent club performances.
 
 Intended as data input for the monthly results round-up email task.
 
 Usage:
-    python scripts/summarise_recent.py              # last 30 days
+    python scripts/summarise_recent.py                                   # last 30 days, Thames H&H
+    python scripts/summarise_recent.py --club "Blackheath & Bromley"
     python scripts/summarise_recent.py --days 60
     python scripts/summarise_recent.py --since 2025-05-01
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -21,7 +23,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import polars as pl
 
-PARQUET = Path(__file__).parent.parent / "data" / "exports" / "thames_hare_hounds.parquet"
+_EXPORTS_DIR = Path(__file__).parent.parent / "data" / "exports"
+
+
+def _club_to_filename(club: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", club.lower()).strip("_")
 
 
 def _to_records(frame: pl.DataFrame) -> list[dict]:
@@ -33,7 +39,11 @@ def _to_records(frame: pl.DataFrame) -> list[dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Summarise recent THH performances as JSON.")
+    parser = argparse.ArgumentParser(description="Summarise recent club performances as JSON.")
+    parser.add_argument(
+        "--club", default="Thames Hare & Hounds",
+        help="Club name (must match the fetch_club.py --club value used to generate the data)",
+    )
     parser.add_argument(
         "--days", type=int, default=30,
         help="Look-back window in days (default: 30)",
@@ -44,14 +54,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not PARQUET.exists():
+    parquet = _EXPORTS_DIR / f"{_club_to_filename(args.club)}.parquet"
+    if not parquet.exists():
         print(
-            "ERROR: Parquet file not found. Run fetch_club.py first.",
+            f"ERROR: Parquet file not found at {parquet}. Run fetch_club.py --club {args.club!r} first.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    df = pl.read_parquet(PARQUET)
+    df = pl.read_parquet(parquet)
 
     since: date = date.fromisoformat(args.since) if args.since else date.today() - timedelta(days=args.days)
     recent = df.filter(pl.col("date_of_performance") >= since)
