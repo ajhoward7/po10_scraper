@@ -8,11 +8,13 @@ build/
 venv/
 *.egg
 
-# Cached athlete HTML pages (300+ files, regenerated on demand)
-data/athletes/
+# All scraped athlete data — kept local only
+data/athletes/        # per-athlete HTML cache (300+ files)
+data/exports/         # output parquet/CSV
+data/*_guids.json     # club athlete lists (names + PO10 GUIDs)
 
-# Exported output files (generated artefacts)
-data/exports/
+# Age-grading tables are NOT ignored — committed as a useful data asset
+# data/age_grade_tables.json
 
 # OS / editor
 .DS_Store
