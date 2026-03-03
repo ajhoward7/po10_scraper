@@ -45,19 +45,37 @@ Capture the JSON output. It contains:
 Using the JSON data, write the email and save to:
 
 ```
-data/exports/roundup_YYYY-MM-DD.html
+data/exports/roundup_YYYY-MM-DD_CLUB_SLUG.html
 ```
 
-(Use today's date in the filename.)
+(Use today's date and a snake_case slug of the club name in the filename, e.g. `roundup_2025-06-01_tonbridge_ac.html`.)
 
 ### Email sections (in order)
 
 1. **Header** — Club name + period covered (e.g. "Results Round-Up: May 2025")
 2. **At a Glance** — 2–3 sentences: how many athletes competed, how many events, any headline stat
-3. **Highlights** — Written narrative (see guidance below)
+3. **Highlights** — Written narrative including optional "In the News" paragraph (see guidance below)
 4. **Top Performances table** — Sourced from `top_absolute`
 5. **Top Age-Graded Performances table** — Sourced from `top_age_graded`
 6. **Sign-off** — From the club captain
+
+---
+
+## Step 2b — Search for recent club news
+
+Use the WebSearch tool to find any recent news articles or coverage about the club. Search for:
+
+```
+"CLUB_NAME" running news [current month] [current year]
+```
+
+and optionally:
+
+```
+"CLUB_NAME" athletics results [current month] [current year]
+```
+
+If any relevant articles are found (race reports, club announcements, athlete spotlights), note their titles, URLs, and a one-sentence summary of each. Discard anything clearly unrelated or older than the round-up window.
 
 ---
 
@@ -74,6 +92,7 @@ Write 3–6 paragraphs of engaging club-newsletter prose. Aim for the tone of a 
 - Athletes competing in multiple events or particularly busy weeks
 - Mention meeting/venue names to give the results a sense of place
 - If `results_url` is available for a performance, mention that full results are linked in the table
+- Any news articles found in Step 2b — summarise briefly and link to them in a short "In the News" paragraph at the end of the Highlights section. Only include if the article is genuinely about this club in this period; do not fabricate or pad with tangentially related content.
 
 **Age grade benchmarks** (use these to calibrate language):
 - ≥ 90% — world-class / elite national standard

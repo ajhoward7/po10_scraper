@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date as _date
 from typing import Optional
 
 from bs4 import BeautifulSoup
@@ -73,6 +74,10 @@ def parse_athlete_page(html: str, guid: str) -> Athlete:
             xc.append(event_bests)
         else:
             track.append(event_bests)
+
+    # Add any performances present in gridData but absent from dataRpValues
+    # (covers parkruns, XC races, relays, and other events missing from evntKeys)
+    track, road, xc = _supplement_from_griddata(html, track, road, xc, links_lookup)
 
     return Athlete(
         guid=guid,
@@ -191,6 +196,132 @@ def _parse_griddata_links(html: str) -> dict[tuple[int, int], str]:
                     except (ValueError, IndexError):
                         pass
     return links
+
+
+def _norm_event(event_code: str) -> str:
+    """Normalise an event code for deduplication: lowercase, spaces → underscores."""
+    return event_code.lower().replace(" ", "_")
+
+
+def _infer_date(day: int, month: int, yr: int) -> Optional[str]:
+    """
+    Return DD/MM/YYYY for a gridData (day, month, season-year) triple.
+
+    gridData 'dte' is "16 Mar" with no year. If the date with the season year
+    is in the future, the performance must be from the previous calendar year.
+    """
+    today = _date.today()
+    try:
+        d = _date(yr, month, day)
+        if d > today:
+            d = _date(yr - 1, month, day)
+        return f"{day:02d}/{month:02d}/{d.year}"
+    except ValueError:
+        return None
+
+
+def _supplement_from_griddata(
+    html: str,
+    track: list[EventBests],
+    road: list[EventBests],
+    xc: list[EventBests],
+    links_lookup: dict[tuple[int, int], str],
+) -> tuple[list[EventBests], list[EventBests], list[EventBests]]:
+    """
+    Supplement the dataRpValues parse with any performances only present in gridData.
+
+    PO10's dataRpValues arrays only exist for events where an athlete has an
+    established history (with a named evntKey entry). Parkruns, XC races with
+    varied distances, relays, and field events often appear exclusively in
+    gridData. This function adds those missing performances.
+    """
+    m = re.search(r"let\s+gridData\s*=\s*(\{.*?\});\s*\n", html, re.DOTALL)
+    if not m:
+        return track, road, xc
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return track, road, xc
+
+    yr = data.get("perfs", {}).get("yr", _date.today().year)
+
+    # Build a dedup set of already-parsed performances: (date, norm_event, perf_display)
+    all_existing = track + road + xc
+    known: set[tuple[str, str, str]] = {
+        (r.date, _norm_event(r.event), r.value_display)
+        for eb in all_existing
+        for r in eb.all_results
+    }
+
+    # Index existing EventBests by normalised event code for O(1) append
+    event_index: dict[str, EventBests] = {
+        _norm_event(eb.event_code): eb for eb in all_existing
+    }
+
+    dictpgs = data.get("perfs", {}).get("dictpgs", {})
+    for cat_data in dictpgs.values():
+        for pg in cat_data.get("pgs", []):
+            for r in pg.get("results", []):
+                event_code   = r.get("evnt", "").strip()
+                perf_display = r.get("perf", "").strip()
+
+                if not event_code or not perf_display:
+                    continue
+                if perf_display.upper() in ("DNS", "DNF", "DQ", "NH", "NM"):
+                    continue
+
+                dte   = r.get("dte", "")
+                parts = dte.strip().split()
+                if len(parts) != 2:
+                    continue
+                try:
+                    day   = int(parts[0])
+                    month = _MONTH_ABBR.get(parts[1].lower(), 0)
+                    if not (day and month):
+                        continue
+                except (ValueError, IndexError):
+                    continue
+
+                date_str = _infer_date(day, month, yr)
+                if date_str is None:
+                    continue
+
+                key = (date_str, _norm_event(event_code), perf_display)
+                if key in known:
+                    continue
+                known.add(key)
+
+                mtid        = r.get("mtid", "")
+                results_url = (_BASE_RESULTS_URL + mtid) if mtid else None
+
+                perf = Performance(
+                    event=event_code,
+                    value_raw=0,          # gridData has display string only
+                    value_display=perf_display,
+                    date=date_str,
+                    meeting=r.get("mtn", ""),
+                    venue=r.get("venn", ""),
+                    position=_safe_int(r.get("pos") or None),
+                    age_group=r.get("ag", ""),
+                    indoor=False,
+                    results_url=results_url,
+                )
+
+                norm = _norm_event(event_code)
+                if norm in event_index:
+                    event_index[norm].all_results.append(perf)
+                else:
+                    eb = EventBests(event_code=event_code, format_type="", all_results=[perf])
+                    event_index[norm] = eb
+                    category = _categorise_event(event_code)
+                    if category == "road":
+                        road.append(eb)
+                    elif category == "xc":
+                        xc.append(eb)
+                    else:
+                        track.append(eb)
+
+    return track, road, xc
 
 
 # ---------------------------------------------------------------------------
