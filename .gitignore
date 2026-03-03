@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Cached athlete HTML pages (300+ files, regenerated on demand)
+data/athletes/
+
+# Exported output files (generated artefacts)
+data/exports/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
