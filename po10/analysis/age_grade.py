@@ -26,7 +26,7 @@ Limitations
   higher, giving a slightly lower age_grade than reality.
 - Field events (High Jump, Discus, Shot, etc.) → null (formula differs).
 - "Senior" age group → age 30 assumed (factor ≈ 1.0 for most events).
-- XC events use nominal road-equivalent distances (8 km for standard XC).
+- XC events (any code containing "XC") → null (distances vary too much).
 """
 
 from __future__ import annotations
@@ -96,9 +96,7 @@ _EVENT_MAP: dict[str, str] = {
     "20M":         "25km",        # 20 miles ≈ 32 km; nearest table entry is 25 km
     "Half_Marathon": "Half.Mar",
     "Marathon":    "Marathon",
-    # ── Cross-country (road-equivalent approximations) ─────────────────────
-    "XC":          "8kmRoad",     # ≈ 8 km road
-    "XC Short":    "5kmRoad",     # ≈ 5 km road (4 km XC not in tables)
+    # ── Cross-country — not graded (XC distances vary too much) ───────────
     # ── Walks ──────────────────────────────────────────────────────────────
     "3000W":       "3kmWalk",
     "5000W":       "5kmWalk",

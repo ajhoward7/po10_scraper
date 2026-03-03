@@ -151,6 +151,7 @@ def build_dataframe(athletes: list[Athlete]) -> pl.DataFrame:
                         "age_group": perf.age_group,
                         "meeting": perf.meeting,
                         "venue": perf.venue,
+                        "results_url": perf.results_url,
                     }
                 )
 
@@ -167,6 +168,7 @@ def build_dataframe(athletes: list[Athlete]) -> pl.DataFrame:
                 "age_group": pl.Utf8,
                 "meeting": pl.Utf8,
                 "venue": pl.Utf8,
+                "results_url": pl.Utf8,
             }
         )
 

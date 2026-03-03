@@ -61,10 +61,11 @@ def parse_athlete_page(html: str, guid: str) -> Athlete:
         )
 
     event_keys = _parse_event_keys(script)
+    links_lookup = _parse_griddata_links(html)
     track, road, xc = [], [], []
 
     for idx, event_code in event_keys.items():
-        event_bests = _parse_event_bests(script, idx, event_code)
+        event_bests = _parse_event_bests(script, idx, event_code, links_lookup)
         category = _categorise_event(event_code)
         if category == "road":
             road.append(event_bests)
@@ -145,6 +146,51 @@ def _parse_event_keys(script: str) -> dict[int, str]:
         int(idx): name
         for idx, name in re.findall(r"evntKeys\.set\((\d+),\s*'([^']+)'\)", script)
     }
+
+
+_MONTH_ABBR: dict[str, int] = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5,  "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+_BASE_RESULTS_URL = "https://www.powerof10.uk/Home/Results/"
+
+
+def _parse_griddata_links(html: str) -> dict[tuple[int, int], str]:
+    """
+    Extract (day, month) → results URL from the inline gridData JSON.
+
+    gridData is a JS variable present on all modern PO10 athlete pages.
+    Each performance entry carries a 'mtid' (meeting ID) and 'dte' ("16 Mar").
+    The full results URL is baseResultsUrl with the mtid substituted in.
+    """
+    m = re.search(r"let\s+gridData\s*=\s*(\{.*?\});\s*\n", html, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return {}
+
+    links: dict[tuple[int, int], str] = {}
+    dictpgs = data.get("perfs", {}).get("dictpgs", {})
+    for cat_data in dictpgs.values():
+        for pg in cat_data.get("pgs", []):
+            for r in pg.get("results", []):
+                mtid = r.get("mtid", "")
+                dte  = r.get("dte", "")   # e.g. "16 Mar"
+                if not mtid or not dte:
+                    continue
+                parts = dte.strip().split()
+                if len(parts) == 2:
+                    try:
+                        day   = int(parts[0])
+                        month = _MONTH_ABBR.get(parts[1].lower(), 0)
+                        if day and month:
+                            links[(day, month)] = mtid
+                    except (ValueError, IndexError):
+                        pass
+    return links
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +294,12 @@ def _safe_int(val) -> Optional[int]:
 # Event bests construction
 # ---------------------------------------------------------------------------
 
-def _parse_event_bests(script: str, idx: int, event_code: str) -> EventBests:
+def _parse_event_bests(
+    script: str,
+    idx: int,
+    event_code: str,
+    links_lookup: Optional[dict[tuple[int, int], str]] = None,
+) -> EventBests:
     # dataFormatToUse{N} is a scalar string, not an array
     fmt = _extract_js_string(script, f"dataFormatToUse{idx}") or "SecCs"
 
@@ -274,6 +325,20 @@ def _parse_event_bests(script: str, idx: int, event_code: str) -> EventBests:
         except (ValueError, TypeError):
             indoor = False
 
+        # Look up results URL via (day, month) key from gridData
+        results_url: Optional[str] = None
+        if links_lookup:
+            date_str = _get(rp_dates, i)
+            if len(date_str) == 10:
+                try:
+                    day   = int(date_str[:2])
+                    month = int(date_str[3:5])
+                    mtid  = links_lookup.get((day, month))
+                    if mtid:
+                        results_url = _BASE_RESULTS_URL + mtid
+                except ValueError:
+                    pass
+
         results.append(
             Performance(
                 event=event_code,
@@ -285,6 +350,7 @@ def _parse_event_bests(script: str, idx: int, event_code: str) -> EventBests:
                 position=_safe_int(_get(rp_positions, i, None)),
                 age_group=_get(rp_age_groups, i),
                 indoor=indoor,
+                results_url=results_url,
             )
         )
 

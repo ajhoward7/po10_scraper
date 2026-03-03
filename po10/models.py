@@ -15,6 +15,7 @@ class Performance:
     position: Optional[int]  # finishing position, nullable
     age_group: str           # "Senior", "Under 20", "V40", etc.
     indoor: bool
+    results_url: Optional[str] = None  # https://www.powerof10.uk/Home/Results/{mtid}
 
 
 @dataclass
