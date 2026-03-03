@@ -62,11 +62,12 @@ def parse_athlete_page(html: str, guid: str) -> Athlete:
         )
 
     event_keys = _parse_event_keys(script)
-    links_lookup = _parse_griddata_links(html)
+    links_lookup  = _parse_griddata_links(html)
+    hcap_lookup   = _parse_hcap_history(html)
     track, road, xc = [], [], []
 
     for idx, event_code in event_keys.items():
-        event_bests = _parse_event_bests(script, idx, event_code, links_lookup)
+        event_bests = _parse_event_bests(script, idx, event_code, links_lookup, hcap_lookup)
         category = _categorise_event(event_code)
         if category == "road":
             road.append(event_bests)
@@ -77,7 +78,7 @@ def parse_athlete_page(html: str, guid: str) -> Athlete:
 
     # Add any performances present in gridData but absent from dataRpValues
     # (covers parkruns, XC races, relays, and other events missing from evntKeys)
-    track, road, xc = _supplement_from_griddata(html, track, road, xc, links_lookup)
+    track, road, xc = _supplement_from_griddata(html, track, road, xc, links_lookup, hcap_lookup)
 
     return Athlete(
         guid=guid,
@@ -198,6 +199,44 @@ def _parse_griddata_links(html: str) -> dict[tuple[int, int], str]:
     return links
 
 
+_HCAP_MONTH: dict[str, str] = {
+    "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
+    "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12",
+}
+
+
+def _parse_hcap_history(html: str) -> dict[str, float]:
+    """
+    Parse hcapHistData / hcapHistDates from the athlete page.
+
+    Returns a dict mapping DD/MM/YYYY → handicap_value for every date on which a
+    qualifying road/XC performance updated the athlete's handicap.
+
+    hcapHistDates format: 'DD Mon YYYY'  e.g. '12 Dec 2025'
+    hcapHistData format:  { x: 2025.945, y: 11.6 }  (y is the resulting handicap)
+    """
+    data_m  = re.search(r"hcapHistData\.push\(\s*\[(.*?)\]\s*\)", html, re.DOTALL)
+    dates_m = re.search(r"hcapHistDates\.push\(\s*\[(.*?)\]\s*\)", html, re.DOTALL)
+    if not data_m or not dates_m:
+        return {}
+
+    y_values = [float(v) for v in re.findall(r"y:\s*([\d.-]+)", data_m.group(1))]
+    raw_dates = re.findall(r"'([^']+)'", dates_m.group(1))
+
+    result: dict[str, float] = {}
+    for raw, y in zip(raw_dates, y_values):
+        parts = raw.strip().split()          # ['12', 'Dec', '2025']
+        if len(parts) != 3:
+            continue
+        month = _HCAP_MONTH.get(parts[1].lower())
+        if not month:
+            continue
+        date_key = f"{int(parts[0]):02d}/{month}/{parts[2]}"   # DD/MM/YYYY
+        result[date_key] = y
+
+    return result
+
+
 def _norm_event(event_code: str) -> str:
     """Normalise an event code for deduplication: lowercase, spaces → underscores."""
     return event_code.lower().replace(" ", "_")
@@ -226,6 +265,7 @@ def _supplement_from_griddata(
     road: list[EventBests],
     xc: list[EventBests],
     links_lookup: dict[tuple[int, int], str],
+    hcap_lookup:  Optional[dict[str, float]] = None,
 ) -> tuple[list[EventBests], list[EventBests], list[EventBests]]:
     """
     Supplement the dataRpValues parse with any performances only present in gridData.
@@ -293,6 +333,7 @@ def _supplement_from_griddata(
 
                 mtid        = r.get("mtid", "")
                 results_url = (_BASE_RESULTS_URL + mtid) if mtid else None
+                handicap    = hcap_lookup.get(date_str) if hcap_lookup else None
 
                 perf = Performance(
                     event=event_code,
@@ -305,6 +346,7 @@ def _supplement_from_griddata(
                     age_group=r.get("ag", ""),
                     indoor=False,
                     results_url=results_url,
+                    handicap=handicap,
                 )
 
                 norm = _norm_event(event_code)
@@ -430,6 +472,7 @@ def _parse_event_bests(
     idx: int,
     event_code: str,
     links_lookup: Optional[dict[tuple[int, int], str]] = None,
+    hcap_lookup:  Optional[dict[str, float]] = None,
 ) -> EventBests:
     # dataFormatToUse{N} is a scalar string, not an array
     fmt = _extract_js_string(script, f"dataFormatToUse{idx}") or "SecCs"
@@ -456,32 +499,36 @@ def _parse_event_bests(
         except (ValueError, TypeError):
             indoor = False
 
+        date_str = _get(rp_dates, i)
+
         # Look up results URL via (day, month) key from gridData
         results_url: Optional[str] = None
-        if links_lookup:
-            date_str = _get(rp_dates, i)
-            if len(date_str) == 10:
-                try:
-                    day   = int(date_str[:2])
-                    month = int(date_str[3:5])
-                    mtid  = links_lookup.get((day, month))
-                    if mtid:
-                        results_url = _BASE_RESULTS_URL + mtid
-                except ValueError:
-                    pass
+        if links_lookup and len(date_str) == 10:
+            try:
+                day   = int(date_str[:2])
+                month = int(date_str[3:5])
+                mtid  = links_lookup.get((day, month))
+                if mtid:
+                    results_url = _BASE_RESULTS_URL + mtid
+            except ValueError:
+                pass
+
+        # Look up handicap value for this performance date
+        handicap: Optional[float] = hcap_lookup.get(date_str) if hcap_lookup else None
 
         results.append(
             Performance(
                 event=event_code,
                 value_raw=val,
                 value_display=_format_value(val, fmt),
-                date=_get(rp_dates, i),
+                date=date_str,
                 meeting=_get(rp_meetings, i),
                 venue=_get(rp_locations, i),
                 position=_safe_int(_get(rp_positions, i, None)),
                 age_group=_get(rp_age_groups, i),
                 indoor=indoor,
                 results_url=results_url,
+                handicap=handicap,
             )
         )
 

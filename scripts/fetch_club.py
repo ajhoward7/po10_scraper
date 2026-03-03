@@ -152,6 +152,7 @@ def build_dataframe(athletes: list[Athlete]) -> pl.DataFrame:
                         "meeting": perf.meeting,
                         "venue": perf.venue,
                         "results_url": perf.results_url,
+                        "handicap": perf.handicap,
                     }
                 )
 
@@ -169,6 +170,7 @@ def build_dataframe(athletes: list[Athlete]) -> pl.DataFrame:
                 "meeting": pl.Utf8,
                 "venue": pl.Utf8,
                 "results_url": pl.Utf8,
+                "handicap": pl.Float32,
             }
         )
 

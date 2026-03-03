@@ -15,7 +15,8 @@ class Performance:
     position: Optional[int]  # finishing position, nullable
     age_group: str           # "Senior", "Under 20", "V40", etc.
     indoor: bool
-    results_url: Optional[str] = None  # https://www.powerof10.uk/Home/Results/{mtid}
+    results_url: Optional[str] = None   # https://www.powerof10.uk/Home/Results/{mtid}
+    handicap: Optional[float] = None    # athlete's handicap after this performance (road/XC only)
 
 
 @dataclass
